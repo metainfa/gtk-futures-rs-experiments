@@ -179,7 +179,7 @@ fn main() {
     let handle = core.handle();
     handle.spawn(future);
     while quit_future.poll() == Ok(Async::NotReady) {
-        core.turn(Some(Duration::from_millis(0)));
+        core.turn(Some(Duration::from_millis(10)));
 
         if gtk::events_pending() {
             gtk::main_iteration();
