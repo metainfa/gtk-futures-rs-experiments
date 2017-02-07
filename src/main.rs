@@ -88,9 +88,9 @@ impl<T, W: Clone> EventStream<T, W> {
         self.events.push(event);
     }
 
-    /*fn get_event(&self) -> Option<T> {
+    fn get_event(&self) -> Option<T> {
         self.events.try_pop()
-    }*/
+    }
 }
 
 impl<T, W: Clone> Stream for EventStream<T, W> {
@@ -98,7 +98,7 @@ impl<T, W: Clone> Stream for EventStream<T, W> {
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        match self.events.try_pop() {
+        match self.get_event() {
             Some(event) => {
                 *self.task.borrow_mut() = None;
                 Ok(Async::Ready(Some((event, self.widgets.clone()))))
@@ -197,10 +197,9 @@ fn main() {
         })
     };
 
-    let future = interval.join(event_future).map(|_| ());
-
     let handle = core.handle();
-    handle.spawn(future);
+    handle.spawn(event_future);
+    handle.spawn(interval);
     while quit_future.poll() == Ok(Async::NotReady) {
         core.turn(Some(Duration::from_millis(10)));
 
