@@ -4,12 +4,15 @@ extern crate gtk;
 extern crate tokio_core;
 extern crate tokio_timer;
 
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
 use crossbeam::sync::MsQueue;
 use futures::{Async, Future, Poll, Stream};
-use gtk::{Button, ButtonExt, ContainerExt, Inhibit, WidgetExt, Window, WindowType};
+use futures::task::{self, Task};
+use gtk::{Button, ButtonExt, ContainerExt, Inhibit, Label, WidgetExt, Window, WindowType};
+use gtk::Orientation::Vertical;
 use tokio_core::reactor::Core;
 use tokio_timer::Timer;
 
@@ -17,29 +20,35 @@ use self::Msg::*;
 
 #[derive(Clone, Debug)]
 enum Msg {
-    Clicked,
+    Decrement,
+    Increment,
     Quit,
 }
 
 #[derive(Clone)]
 struct EventStream<T> {
     events: Rc<MsQueue<T>>,
+    task: Rc<RefCell<Option<Task>>>,
 }
 
 impl<T> EventStream<T> {
     fn new() -> Self {
         EventStream {
             events: Rc::new(MsQueue::new()),
+            task: Rc::new(RefCell::new(None)),
         }
     }
 
     fn emit(&self, event: T) {
+        if let Some(ref task) = *self.task.borrow() {
+            task.unpark();
+        }
         self.events.push(event);
     }
 
-    fn get_event(&self) -> Option<T> {
+    /*fn get_event(&self) -> Option<T> {
         self.events.try_pop()
-    }
+    }*/
 }
 
 impl<T> Stream for EventStream<T> {
@@ -48,8 +57,14 @@ impl<T> Stream for EventStream<T> {
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         match self.events.try_pop() {
-            Some(event) => Ok(Async::Ready(Some(event))),
-            None => Ok(Async::NotReady),
+            Some(event) => {
+                *self.task.borrow_mut() = None;
+                Ok(Async::Ready(Some(event)))
+            },
+            None => {
+                *self.task.borrow_mut() = Some(task::park());
+                Ok(Async::NotReady)
+            },
         }
     }
 }
@@ -61,14 +76,29 @@ fn main() {
 
     let window = Window::new(WindowType::Toplevel);
 
-    let button = Button::new_with_label("Click me!");
+    let vbox = gtk::Box::new(Vertical, 0);
+    window.add(&vbox);
+
+    let plus_button = Button::new_with_label("+");
+    vbox.add(&plus_button);
     {
         let stream = stream.clone();
-        button.connect_clicked(move |_| {
-            stream.emit(Clicked);
+        plus_button.connect_clicked(move |_| {
+            stream.emit(Increment);
         });
     }
-    window.add(&button);
+
+    let label = Label::new(Some("0"));
+    vbox.add(&label);
+
+    let minus_button = Button::new_with_label("-");
+    vbox.add(&minus_button);
+    {
+        let stream = stream.clone();
+        minus_button.connect_clicked(move |_| {
+            stream.emit(Decrement);
+        });
+    }
 
     window.show_all();
 
