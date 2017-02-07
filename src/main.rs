@@ -26,16 +26,18 @@ enum Msg {
 }
 
 #[derive(Clone)]
-struct EventStream<T> {
+struct EventStream<T, W: Clone> {
     events: Rc<MsQueue<T>>,
     task: Rc<RefCell<Option<Task>>>,
+    widgets: W,
 }
 
-impl<T> EventStream<T> {
-    fn new() -> Self {
+impl<T, W: Clone> EventStream<T, W> {
+    fn new(widgets: W) -> Self {
         EventStream {
             events: Rc::new(MsQueue::new()),
             task: Rc::new(RefCell::new(None)),
+            widgets: widgets,
         }
     }
 
@@ -51,15 +53,15 @@ impl<T> EventStream<T> {
     }*/
 }
 
-impl<T> Stream for EventStream<T> {
-    type Item = T;
+impl<T, W: Clone> Stream for EventStream<T, W> {
+    type Item = (T, W);
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         match self.events.try_pop() {
             Some(event) => {
                 *self.task.borrow_mut() = None;
-                Ok(Async::Ready(Some(event)))
+                Ok(Async::Ready(Some((event, self.widgets.clone()))))
             },
             None => {
                 *self.task.borrow_mut() = Some(task::park());
@@ -72,24 +74,26 @@ impl<T> Stream for EventStream<T> {
 fn main() {
     gtk::init().unwrap();
 
-    let stream = EventStream::new();
-
-    let window = Window::new(WindowType::Toplevel);
-
     let vbox = gtk::Box::new(Vertical, 0);
-    window.add(&vbox);
 
     let plus_button = Button::new_with_label("+");
     vbox.add(&plus_button);
+
+    let label = Label::new(Some("0"));
+    vbox.add(&label);
+
+    let stream = EventStream::new(label);
+
+    let window = Window::new(WindowType::Toplevel);
+
+    window.add(&vbox);
+
     {
         let stream = stream.clone();
         plus_button.connect_clicked(move |_| {
             stream.emit(Increment);
         });
     }
-
-    let label = Label::new(Some("0"));
-    vbox.add(&label);
 
     let minus_button = Button::new_with_label("-");
     vbox.add(&minus_button);
@@ -118,8 +122,20 @@ fn main() {
         Ok(())
     });
 
-    let event_future = stream.for_each(|event| {
-        println!("{:?}", event);
+    let event_future = stream.for_each(|(event, label)| {
+        fn adjust(label: Label, delta: i32) {
+            if let Some(text) = label.get_text() {
+                let num: i32 = text.parse().unwrap();
+                let result = num + delta;
+                label.set_text(&result.to_string());
+            }
+        }
+
+        match event {
+            Decrement => adjust(label, -1),
+            Increment => adjust(label, 1),
+            Quit => println!("{:?}", event), // TODO
+        }
         Ok(())
     });
 
