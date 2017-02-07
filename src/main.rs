@@ -4,7 +4,7 @@ extern crate gtk;
 extern crate tokio_core;
 extern crate tokio_timer;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -23,6 +23,37 @@ enum Msg {
     Decrement,
     Increment,
     Quit,
+}
+
+#[derive(Clone)]
+struct QuitFuture {
+    quitted: Rc<Cell<bool>>,
+}
+
+impl QuitFuture {
+    fn new() -> Self {
+        QuitFuture {
+            quitted: Rc::new(Cell::new(false)),
+        }
+    }
+
+    fn quit(&self) {
+        self.quitted.set(true);
+    }
+}
+
+impl Future for QuitFuture {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Result<Async<Self::Item>, Self::Error> {
+        if self.quitted.get() {
+            Ok(Async::Ready(()))
+        }
+        else {
+            Ok(Async::NotReady)
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -83,6 +114,7 @@ fn main() {
     vbox.add(&label);
 
     let stream = EventStream::new(label);
+    let mut quit_future = QuitFuture::new();
 
     let window = Window::new(WindowType::Toplevel);
 
@@ -122,28 +154,31 @@ fn main() {
         Ok(())
     });
 
-    let event_future = stream.for_each(|(event, label)| {
-        fn adjust(label: Label, delta: i32) {
-            if let Some(text) = label.get_text() {
-                let num: i32 = text.parse().unwrap();
-                let result = num + delta;
-                label.set_text(&result.to_string());
+    let event_future = {
+        let quit_future = quit_future.clone();
+        stream.for_each(move |(event, label)| {
+            fn adjust(label: Label, delta: i32) {
+                if let Some(text) = label.get_text() {
+                    let num: i32 = text.parse().unwrap();
+                    let result = num + delta;
+                    label.set_text(&result.to_string());
+                }
             }
-        }
 
-        match event {
-            Decrement => adjust(label, -1),
-            Increment => adjust(label, 1),
-            Quit => println!("{:?}", event), // TODO
-        }
-        Ok(())
-    });
+            match event {
+                Decrement => adjust(label, -1),
+                Increment => adjust(label, 1),
+                Quit => quit_future.quit(),
+            }
+            Ok(())
+        })
+    };
 
     let future = interval.join(event_future).map(|_| ());
 
     let handle = core.handle();
     handle.spawn(future);
-    loop {
+    while quit_future.poll() == Ok(Async::NotReady) {
         core.turn(Some(Duration::from_millis(0)));
 
         if gtk::events_pending() {
