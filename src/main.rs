@@ -1,3 +1,4 @@
+extern crate chrono;
 extern crate crossbeam;
 extern crate futures;
 extern crate gtk;
@@ -8,6 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
+use chrono::Local;
 use crossbeam::sync::MsQueue;
 use futures::{Async, Future, Poll, Stream};
 use futures::task::{self, Task};
@@ -18,8 +20,15 @@ use tokio_timer::Timer;
 
 use self::Msg::*;
 
+#[derive(Clone)]
+struct Widgets {
+    clock_label: Label,
+    counter_label: Label,
+}
+
 #[derive(Clone, Debug)]
 enum Msg {
+    Clock,
     Decrement,
     Increment,
     Quit,
@@ -107,13 +116,20 @@ fn main() {
 
     let vbox = gtk::Box::new(Vertical, 0);
 
+    let clock_label = Label::new(None);
+    vbox.add(&clock_label);
+
     let plus_button = Button::new_with_label("+");
     vbox.add(&plus_button);
 
-    let label = Label::new(Some("0"));
-    vbox.add(&label);
+    let counter_label = Label::new(Some("0"));
+    vbox.add(&counter_label);
 
-    let stream = EventStream::new(label);
+    let widgets = Widgets {
+        clock_label: clock_label,
+        counter_label: counter_label,
+    };
+    let stream = EventStream::new(Rc::new(widgets));
     let mut quit_future = QuitFuture::new();
 
     let window = Window::new(WindowType::Toplevel);
@@ -148,16 +164,19 @@ fn main() {
 
     let mut core = Core::new().unwrap();
     let timer = Timer::default();
-    let interval = timer.interval(Duration::from_millis(1000));
-    let interval = interval.map_err(|_| ()).for_each(|_| {
-        println!("Interval");
-        Ok(())
-    });
+    let interval = {
+        let interval = timer.interval(Duration::from_millis(1000));
+        let stream = stream.clone();
+        interval.map_err(|_| ()).for_each(move |_| {
+            stream.emit(Clock);
+            Ok(())
+        })
+    };
 
     let event_future = {
         let quit_future = quit_future.clone();
-        stream.for_each(move |(event, label)| {
-            fn adjust(label: Label, delta: i32) {
+        stream.for_each(move |(event, widgets)| {
+            fn adjust(label: &Label, delta: i32) {
                 if let Some(text) = label.get_text() {
                     let num: i32 = text.parse().unwrap();
                     let result = num + delta;
@@ -166,8 +185,12 @@ fn main() {
             }
 
             match event {
-                Decrement => adjust(label, -1),
-                Increment => adjust(label, 1),
+                Clock => {
+                    let now = Local::now();
+                    widgets.clock_label.set_text(&now.format("%H:%M:%S").to_string());
+                },
+                Decrement => adjust(&widgets.counter_label, -1),
+                Increment => adjust(&widgets.counter_label, 1),
                 Quit => quit_future.quit(),
             }
             Ok(())

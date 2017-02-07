@@ -4,6 +4,7 @@ name = "gtk_tokio"
 version = "0.1.0"
 
 [dependencies]
+chrono = "^0.3.0"
 crossbeam = "^0.2.10"
 futures = "^0.1.10"
 gtk = "^0.1.1"
