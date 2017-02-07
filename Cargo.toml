@@ -1,0 +1,10 @@
+[package]
+authors = ["Antoni Boucher <bouanto@zoho.com>"]
+name = "gtk_tokio"
+version = "0.1.0"
+
+[dependencies]
+futures = "^0.1.10"
+gtk = "^0.1.1"
+tokio-core = "^0.1.4"
+tokio-timer = "^0.1.0"
